@@ -3,7 +3,7 @@
 //
 
 #include "multi_stage_primitive.hpp"
-#include "scaled_dot_product_attention_inst.h"
+#include "scaled_dot_product_attention_v1_inst.h"
 #include "kv_cache_inst.h"
 
 #include "sdpa/sdpa_kernel_selector.h"
@@ -17,24 +17,24 @@ namespace ocl {
 // 2. SDPA kernels with indirect access to one of the inputs
 // This feature is used to avoid perf drop when we create single kernel which checks batch size in runtime
 // Can be reverted once performance of the kernel is improved
-struct scaled_dot_product_attention_impl : multi_stage_primitive<scaled_dot_product_attention> {
-    using parent = multi_stage_primitive<scaled_dot_product_attention>;
+struct scaled_dot_product_attention_v1_impl : multi_stage_primitive<scaled_dot_product_attention_v1> {
+    using parent = multi_stage_primitive<scaled_dot_product_attention_v1>;
     using parent::parent;
     using kernel_selector_t = kernel_selector::sdpa_kernel_selector;
     using kernel_params_t = kernel_selector::sdpa_params;
 
-    DECLARE_OBJECT_TYPE_SERIALIZATION(cldnn::ocl::scaled_dot_product_attention_impl)
+    DECLARE_OBJECT_TYPE_SERIALIZATION(cldnn::ocl::scaled_dot_product_attention_v1_impl)
 
     const uint32_t default_sdpa = 0;
     const uint32_t indirect_sdpa = 1;
 
     std::unique_ptr<primitive_impl> clone() const override {
-        return make_unique<scaled_dot_product_attention_impl>(*this);
+        return make_unique<scaled_dot_product_attention_v1_impl>(*this);
     }
 
-    scaled_dot_product_attention_impl() = default;
+    scaled_dot_product_attention_v1_impl() = default;
 
-    scaled_dot_product_attention_impl(const std::vector<kernel_selector::kernel_data>& kd) : parent(kd) {
+    scaled_dot_product_attention_v1_impl(const std::vector<kernel_selector::kernel_data>& kd) : parent(kd) {
         this->can_reuse_memory = true;
     }
 
@@ -71,16 +71,16 @@ protected:
         return layouts;
     }
 
-    static size_t get_beam_table_id(std::shared_ptr<const scaled_dot_product_attention> primitive) {
+    static size_t get_beam_table_id(std::shared_ptr<const scaled_dot_product_attention_v1> primitive) {
         return primitive->input_size() - 1;
     }
 
     static bool has_indirect_inputs(const kernel_impl_params& impl_param) {
-        const auto& desc = impl_param.typed_desc<scaled_dot_product_attention>();
+        const auto& desc = impl_param.typed_desc<scaled_dot_product_attention_v1>();
         return desc->indirect_axis != -1;
     }
 
-    kernel_arguments_data get_arguments(const scaled_dot_product_attention_inst& instance, size_t stage) const override {
+    kernel_arguments_data get_arguments(const scaled_dot_product_attention_v1_inst& instance, size_t stage) const override {
         kernel_arguments_data args;
 
         auto inputs_num = instance.inputs_memory_count();
@@ -107,9 +107,9 @@ protected:
         return args;
     }
 
-    void set_arguments_impl(scaled_dot_product_attention_inst& instance) override {}
+    void set_arguments_impl(scaled_dot_product_attention_v1_inst& instance) override {}
 
-    event::ptr execute_stage(const std::vector<event::ptr>& events, scaled_dot_product_attention_inst& instance, size_t stage) {
+    event::ptr execute_stage(const std::vector<event::ptr>& events, scaled_dot_product_attention_v1_inst& instance, size_t stage) {
         stream& stream = instance.get_network().get_stream();
         std::vector<event::ptr> tmp_events(events);
         std::vector<event::ptr> all_events;
@@ -152,8 +152,8 @@ protected:
         return aggregate_events(all_events, stream, all_events.size() > 1);
     }
 
-    bool need_indirect_load(const scaled_dot_product_attention_inst& instance) const {
-        auto desc = instance.get_typed_desc<scaled_dot_product_attention>();
+    bool need_indirect_load(const scaled_dot_product_attention_v1_inst& instance) const {
+        auto desc = instance.get_typed_desc<scaled_dot_product_attention_v1>();
 
         if (!instance.has_indirect_inputs())
             return false;
@@ -176,7 +176,7 @@ protected:
         return !is_prefill;
     }
 
-    event::ptr execute_impl(const std::vector<event::ptr>& events, scaled_dot_product_attention_inst& instance) override {
+    event::ptr execute_impl(const std::vector<event::ptr>& events, scaled_dot_product_attention_v1_inst& instance) override {
         if (need_indirect_load(instance))
             return execute_stage(events, instance, indirect_sdpa);
         else
@@ -197,7 +197,7 @@ protected:
             return transposed_pshape;
         };
 
-        const auto& desc = impl_param.typed_desc<scaled_dot_product_attention>();
+        const auto& desc = impl_param.typed_desc<scaled_dot_product_attention_v1>();
         const auto query_shape = transpose_pshape(impl_param.get_input_layout(0).get_partial_shape(), desc->input_q_transpose_order);
         const auto key_shape = transpose_pshape(impl_param.get_input_layout(1).get_partial_shape(), desc->input_k_transpose_order);
         const auto value_shape = transpose_pshape(impl_param.get_input_layout(2).get_partial_shape(), desc->input_v_transpose_order);
@@ -222,7 +222,7 @@ protected:
 
 public:
     static kernel_params_t get_kernel_params(const kernel_impl_params& impl_param, bool is_dynamic, bool indirect = false) {
-        const auto& desc = impl_param.typed_desc<scaled_dot_product_attention>();
+        const auto& desc = impl_param.typed_desc<scaled_dot_product_attention_v1>();
         auto params = get_default_params<kernel_selector::sdpa_params>(impl_param, is_dynamic);
 
         auto data_inputs_num = impl_param.input_layouts.size();
@@ -260,7 +260,7 @@ public:
         return params;
     }
 
-    static std::unique_ptr<primitive_impl> create(const typed_program_node<scaled_dot_product_attention>& arg, const kernel_impl_params& impl_param) {
+    static std::unique_ptr<primitive_impl> create(const typed_program_node<scaled_dot_product_attention_v1>& arg, const kernel_impl_params& impl_param) {
         std::vector<kernel_selector::kernel_data> kernels_data;
         auto sdpa_kernel_params = get_kernel_params(impl_param, impl_param.is_dynamic());
         auto& kernel_selector = kernel_selector_t::Instance();
@@ -271,7 +271,7 @@ public:
             kernels_data.push_back(kernel_selector.get_best_kernel(indirect_kernel_params));
         }
 
-        return cldnn::make_unique<scaled_dot_product_attention_impl>(kernels_data);
+        return cldnn::make_unique<scaled_dot_product_attention_v1_impl>(kernels_data);
     }
 
     void update_dispatch_data(const kernel_impl_params& impl_param) override {
@@ -295,7 +295,7 @@ public:
 namespace detail {
 
 attach_scaled_dot_product_attention_impl::attach_scaled_dot_product_attention_impl() {
-    using sdpa_prim = scaled_dot_product_attention;
+    using sdpa_prim = scaled_dot_product_attention_v1;
 
     auto types = {
         data_types::f32,
@@ -308,13 +308,13 @@ attach_scaled_dot_product_attention_impl::attach_scaled_dot_product_attention_im
 
     implementation_map<sdpa_prim>::add(impl_types::ocl,
                                        shape_types::static_shape,
-                                       scaled_dot_product_attention_impl::create,
+                                       scaled_dot_product_attention_v1_impl::create,
                                        types,
                                        formats);
 
     implementation_map<sdpa_prim>::add(impl_types::ocl,
                                        shape_types::dynamic_shape,
-                                       scaled_dot_product_attention_impl::create,
+                                       scaled_dot_product_attention_v1_impl::create,
                                        types,
                                        formats);
 }
@@ -323,5 +323,5 @@ attach_scaled_dot_product_attention_impl::attach_scaled_dot_product_attention_im
 }  // namespace ocl
 }  // namespace cldnn
 
-BIND_BINARY_BUFFER_WITH_TYPE(cldnn::ocl::scaled_dot_product_attention_impl)
-BIND_BINARY_BUFFER_WITH_TYPE(cldnn::scaled_dot_product_attention)
+BIND_BINARY_BUFFER_WITH_TYPE(cldnn::ocl::scaled_dot_product_attention_v1_impl)
+BIND_BINARY_BUFFER_WITH_TYPE(cldnn::scaled_dot_product_attention_v1)

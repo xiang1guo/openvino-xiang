@@ -30,6 +30,7 @@
 #include "condition_inst.h"
 #include "gather_inst.h"
 #include "broadcast_inst.h"
+#include "scaled_dot_product_attention_inst.h"
 #include "experimental_detectron_roi_feature_extractor_inst.hpp"
 #include "implementation_map.hpp"
 #include "graph_optimizer/prepare_buffer_fusing.h"
@@ -901,7 +902,7 @@ bool primitive_inst::use_async_compilation() {
         compile_gemm_impls |= (_node->get_preferred_impl_type() == impl_types::onednn);
     }
 
-    return (_node->is_type<convolution>() || compile_fc_impls || compile_gemm_impls ||
+    return ( _node->is_type<scaled_dot_product_attention>() || _node->is_type<convolution>() || compile_fc_impls || compile_gemm_impls ||
             (_node->is_type<softmax>() && _node->get_selected_impl() &&
              _node->get_selected_impl()->get_kernel_name().find("softmax_gpu_ref") != std::string::npos));
 }

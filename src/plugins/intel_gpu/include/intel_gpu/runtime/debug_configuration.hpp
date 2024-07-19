@@ -139,6 +139,7 @@ public:
     int disable_build_time_weight_reorder_for_dynamic_nodes;    // Disable build time weight reordering for dynamic nodes
     int disable_runtime_skip_reorder;                           // Disable runtime skip reorder
     int disable_primitive_fusing;                               // Disable primitive fusing
+    int disable_mha_fusing;                                     // Disable primitive fusing
     int disable_fake_alignment;                                 // Disable fake alignment
     int enable_dynamic_quantize;                                // Enable Dynamic quantization for fully connected primitive
     int disable_horizontal_fc_fusion;                           // Disable fc horizontal fusion

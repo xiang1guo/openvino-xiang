@@ -150,6 +150,10 @@
 #include "transformations/rt_info/keep_const_precision.hpp"
 #include "transformations/smart_reshape/matmul_sr.hpp"
 
+#include "plugin/transformations/apply_mha_fusion.hpp"
+#include "plugin/transformations/scaled_dot_product_attention_partial_decomposition.hpp"
+#include "intel_gpu/runtime/debug_configuration.hpp"
+
 namespace {
 template<typename T>
 static bool disable_reduce_decomposition(const std::shared_ptr<const ov::Node> node) {
@@ -201,11 +205,13 @@ namespace intel_gpu {
 
 void TransformationsPipeline::apply(std::shared_ptr<ov::Model> func) {
     OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "TransformationsPipeline::apply");
+    GPU_DEBUG_GET_INSTANCE(debug_config);
     using const_node_ptr = const std::shared_ptr<const ov::Node>;
 
     const auto& defaultPrecisions = ov::pass::low_precision::precision_set::get_int8_support();
     const ov::element::TypeVector supported_woq_types = {ov::element::u8, ov::element::i8, ov::element::u4, ov::element::i4};
     bool enableInt8;
+    bool enable_mha_fusion = true;
     bool unroll_loop = config.get_property(ov::intel_gpu::enable_loop_unrolling);
     {
         ov::pass::Manager manager;
@@ -315,6 +321,12 @@ void TransformationsPipeline::apply(std::shared_ptr<ov::Model> func) {
                                                           keep_precision_sensitive_in_fp32_1,
                                                           convert_input_output_precision,
                                                           store_original_precision_as_rt_attribute);
+        
+        if (device_info.supports_immad) {
+            // partial decomposition of SDPA
+            // manager.register_pass<ov::intel_gpu::ScaledDotProductAttentionPartialDecomposition>();
+            // pass_config->disable<ov::pass::ScaledDotProductAttentionDecomposition>();
+        }
 
         manager.register_pass<ov::pass::CommonOptimizations>();
 
@@ -322,6 +334,8 @@ void TransformationsPipeline::apply(std::shared_ptr<ov::Model> func) {
             GPU_DEBUG_IF(cldnn::debug_configuration::get_instance()->enable_sdpa != -1) {
                 GPU_DEBUG_CODE(return cldnn::debug_configuration::get_instance()->enable_sdpa == 1);
             }
+
+            // return false;
 
             if (!config.get_property(ov::intel_gpu::hint::enable_sdpa_optimization))
                 return false;
@@ -854,6 +868,15 @@ void TransformationsPipeline::apply(std::shared_ptr<ov::Model> func) {
             manager.register_pass<ov::intel_gpu::PrintModelStatistics>();
         }
 
+        manager.run_passes(func);
+    }
+
+    GPU_DEBUG_IF(debug_config->disable_mha_fusing) {
+        enable_mha_fusion = false;
+    }
+    if (enable_mha_fusion) {
+        ov::pass::Manager manager;
+        manager.register_pass<ov::intel_gpu::ApplyMHAFusion>();
         manager.run_passes(func);
     }
 }

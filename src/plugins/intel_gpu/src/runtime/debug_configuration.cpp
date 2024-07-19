@@ -193,6 +193,7 @@ static void print_help_messages() {
                                " Currently, other layers except input-layer('parameter' type) are loading binaries for only input."
                                " Different input or output tensors are seperated by ','. Different layers are separated by space. For example, "
                                " \"[input_layer_name1]:[binary_dumped_file1],[binary_dump_file2] [input_layer_name2]:[binary_dump_1],[binary_dump_2]\"");
+    message_list.emplace_back("OV_GPU_DisableMHAFusion", "Disable Multi-Head Attention Fusion");
 
     auto max_name_length_item = std::max_element(message_list.begin(), message_list.end(),
         [](std::pair<std::string, std::string>& a, std::pair<std::string, std::string>& b){
@@ -247,6 +248,7 @@ debug_configuration::debug_configuration()
         , disable_build_time_weight_reorder_for_dynamic_nodes(0)
         , disable_runtime_skip_reorder(0)
         , disable_primitive_fusing(0)
+        , disable_mha_fusing(0)
         , disable_fake_alignment(0)
         , enable_dynamic_quantize(0)
         , disable_horizontal_fc_fusion(0) {
@@ -299,6 +301,7 @@ debug_configuration::debug_configuration()
     get_gpu_debug_env_var("DisableBuildTimeWeightReorderForDynamicNodes", disable_build_time_weight_reorder_for_dynamic_nodes);
     get_gpu_debug_env_var("DisableRuntimeSkipReorder", disable_runtime_skip_reorder);
     get_gpu_debug_env_var("DisablePrimitiveFusing", disable_primitive_fusing);
+    get_gpu_debug_env_var("DisableMhaFusing", disable_mha_fusing);
     get_gpu_debug_env_var("DisableFakeAlignment", disable_fake_alignment);
     get_gpu_debug_env_var("EnableDynamicQuantize", enable_dynamic_quantize);
     get_gpu_debug_env_var("DisableHorizontalFCFusion", disable_horizontal_fc_fusion);
