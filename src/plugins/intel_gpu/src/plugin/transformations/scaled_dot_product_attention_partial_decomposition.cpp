@@ -17,6 +17,7 @@
 #include "openvino/op/greater_eq.hpp"
 #include "openvino/op/logical_not.hpp"
 // #include "openvino/op/matmul.hpp"
+#include "intel_gpu/op/scaled_dot_product_attention.hpp"
 #include "openvino/op/multiply.hpp"
 #include "openvino/op/range.hpp"
 #include "openvino/op/scaled_dot_product_attention.hpp"
@@ -29,45 +30,149 @@
 #include "openvino/op/unsqueeze.hpp"
 #include "openvino/pass/pattern/op/wrap_type.hpp"
 #include "transformations/utils/utils.hpp"
-#include "intel_gpu/op/scaled_dot_product_attention.hpp"
+#include "openvino/pass/pattern/op/or.hpp"
+#include "openvino/pass/pattern/op/any.hpp"
+
+// TODO: remove this by adding order attrs in graph API sdpa
+#include "intel_gpu/op/sdpa.hpp"
+
+using namespace ov::pass::pattern;
+using ov::pass::pattern::op::Or;
 
 namespace ov {
 namespace intel_gpu {
 
 ScaledDotProductAttentionPartialDecomposition::ScaledDotProductAttentionPartialDecomposition() {
-    auto pattern_node = ov::pass::pattern::wrap_type<ov::op::v13::ScaledDotProductAttention>();
+    auto is_fp_type = [](const ov::Output<ov::Node>& output) -> bool {
+        switch (output.get_element_type()) {
+        case ov::element::f16:
+        case ov::element::f32:
+            return true;
+        default:
+            return false;
+        }
+    };
+    auto not_transpose = [is_fp_type](const ov::Output<ov::Node>& output) -> bool {
+        return std::dynamic_pointer_cast<ov::op::v1::Transpose>(output.get_node_shared_ptr()) == nullptr &&
+               is_fp_type(output);
+    };
+
+    auto input_q_m = any_input(not_transpose);
+    auto input_k_m = any_input(not_transpose);
+    auto input_v_m = any_input(not_transpose);
+    auto input_attn_mask = any_input(not_transpose);
+    auto input_scale = any_input(not_transpose);
+    auto transpose_q_order_m = wrap_type<ov::op::v0::Constant>(consumers_count(1));
+    auto transpose_k_order_m = wrap_type<ov::op::v0::Constant>(consumers_count(1));
+    auto transpose_v_order_m = wrap_type<ov::op::v0::Constant>(consumers_count(1));
+    auto transpose_q_m = wrap_type<ov::op::v1::Transpose>({input_q_m, transpose_q_order_m}, is_fp_type);
+    auto transpose_k_m = wrap_type<ov::op::v1::Transpose>({input_k_m, transpose_k_order_m}, is_fp_type);
+    auto transpose_v_m = wrap_type<ov::op::v1::Transpose>({input_v_m, transpose_v_order_m}, is_fp_type);
+
+    auto sdpa_in_q = std::make_shared<Or>(OutputVector{input_q_m, transpose_q_m});
+    auto sdpa_in_k = std::make_shared<Or>(OutputVector{input_k_m, transpose_k_m});
+    auto sdpa_in_v = std::make_shared<Or>(OutputVector{input_v_m, transpose_v_m});
+
+    auto sdpa_without_attn_mask_m =
+        wrap_type<ov::op::v13::ScaledDotProductAttention>({sdpa_in_q, sdpa_in_k, sdpa_in_v});
+    auto sdpa_with_attn_mask_m =
+        wrap_type<ov::op::v13::ScaledDotProductAttention>({sdpa_in_q, sdpa_in_k, sdpa_in_v, input_attn_mask});
+    auto sdpa_with_attn_mask_and_scale_m = wrap_type<ov::op::v13::ScaledDotProductAttention>(
+        {sdpa_in_q, sdpa_in_k, sdpa_in_v, input_attn_mask, input_scale});
+    auto sdpa_m = std::make_shared<Or>(
+        OutputVector{sdpa_without_attn_mask_m, sdpa_with_attn_mask_m, sdpa_with_attn_mask_and_scale_m});
 
     matcher_pass_callback callback = [OV_CAPTURE_CPY_AND_THIS](ov::pass::pattern::Matcher& m) {
-        auto& pattern_to_output = m.get_pattern_value_map();
-        auto node = std::dynamic_pointer_cast<ov::op::v13::ScaledDotProductAttention>(
-            pattern_to_output.at(pattern_node).get_node_shared_ptr());
+        const auto& pattern_map = m.get_pattern_value_map();
+        auto sdpa = std::dynamic_pointer_cast<ov::op::v13::ScaledDotProductAttention>(m.get_match_root());
 
-        if (node == nullptr || transformation_callback(node)) {
+        if (!sdpa || transformation_callback(sdpa)) {
             return false;
         }
 
-        auto new_output_node = decompose(node);
-        ov::replace_node(node, new_output_node);
+        // TODO: need to add these part in graph internal sdpa
+        auto order_q = op::SDPA::default_order(sdpa->get_input_partial_shape(0).size());
+        auto order_k = op::SDPA::default_order(sdpa->get_input_partial_shape(1).size());
+        auto order_v = op::SDPA::default_order(sdpa->get_input_partial_shape(2).size());
+        auto order_output = op::SDPA::default_order(sdpa->get_output_partial_shape(0).size());
+
+        size_t input_q_output_idx = sdpa->get_input_source_output(0).get_index();
+        size_t input_k_output_idx = sdpa->get_input_source_output(1).get_index();
+        size_t input_v_output_idx = sdpa->get_input_source_output(2).get_index();
+
+        auto process_transpose = [](const std::shared_ptr<Node>& transpose_node,
+                                    const std::shared_ptr<Node>& transpose_order_const_node,
+                                    std::vector<int64_t>& order,
+                                    size_t& output_idx) {
+            auto transpose_order_const = std::dynamic_pointer_cast<ov::op::v0::Constant>(transpose_order_const_node);
+
+            order = transpose_order_const->cast_vector<int64_t>();
+            // Allow any transposes without head_size dim position change
+            if (order.back() != static_cast<int64_t>(order.size() - 1))
+                return false;
+
+            auto transpose = std::dynamic_pointer_cast<ov::op::v1::Transpose>(transpose_node);
+            output_idx = transpose->get_input_source_output(0).get_index();
+
+            return true;
+        };
+
+        bool can_fuse_transposes = true;
+        if (pattern_map.count(transpose_q_m) > 0)
+            can_fuse_transposes &= process_transpose(pattern_map.at(transpose_q_m).get_node_shared_ptr(),
+                                                     pattern_map.at(transpose_q_order_m).get_node_shared_ptr(),
+                                                     order_q,
+                                                     input_q_output_idx);
+
+        if (pattern_map.count(transpose_k_m) > 0)
+            can_fuse_transposes &= process_transpose(pattern_map.at(transpose_k_m).get_node_shared_ptr(),
+                                                     pattern_map.at(transpose_k_order_m).get_node_shared_ptr(),
+                                                     order_k,
+                                                     input_k_output_idx);
+
+        if (pattern_map.count(transpose_v_m) > 0)
+            can_fuse_transposes &= process_transpose(pattern_map.at(transpose_v_m).get_node_shared_ptr(),
+                                                     pattern_map.at(transpose_v_order_m).get_node_shared_ptr(),
+                                                     order_v,
+                                                     input_v_output_idx);
+
+        if (!can_fuse_transposes)
+            return false;
+
+        auto input_q = ov::Output<Node>(pattern_map.at(input_q_m).get_node_shared_ptr(), input_q_output_idx);
+        auto input_k = ov::Output<Node>(pattern_map.at(input_k_m).get_node_shared_ptr(), input_k_output_idx);
+        auto input_v = ov::Output<Node>(pattern_map.at(input_v_m).get_node_shared_ptr(), input_v_output_idx);
+
+        auto new_output_node = decompose(sdpa, input_q, input_k, input_v, order_q, order_k, order_v, order_output);
+        ov::replace_node(sdpa, new_output_node);
         return true;
     };
 
-    auto m = std::make_shared<ov::pass::pattern::Matcher>(pattern_node,
-        "ScaledDotProductAttentionPartialDecomposition");
+    auto m =
+        std::make_shared<ov::pass::pattern::Matcher>(sdpa_m, "ScaledDotProductAttentionPartialDecomposition");
     register_matcher(m, callback);
 }
 
 std::shared_ptr<ov::Node> ScaledDotProductAttentionPartialDecomposition::decompose(
-    std::shared_ptr<ov::op::v13::ScaledDotProductAttention> node) {
+    std::shared_ptr<ov::op::v13::ScaledDotProductAttention> node,
+    ov::Output<Node>& query,
+    ov::Output<Node>& key,
+    ov::Output<Node>& value,
+    const std::vector<int64_t>& order_q,
+    const std::vector<int64_t>& order_k,
+    const std::vector<int64_t>& order_v,
+    const std::vector<int64_t>& order_out) {
     using namespace ov::op;
-    auto query = node->input_value(0);
-    auto key = node->input_value(1);
-    auto value = node->input_value(2);
+    // auto query = node->input_value(0);
+    // auto key = node->input_value(1);
+    // auto value = node->input_value(2);
 
     auto q_shape = register_new_node<v3::ShapeOf>(query, element::i32);
     auto k_shape = register_new_node<v3::ShapeOf>(key, element::i32);
     auto minus_one = register_new_node(v0::Constant::create(element::i32, Shape{}, {-1}));
     auto minus_two = register_new_node(v0::Constant::create(element::i32, Shape{}, {-2}));
-    auto minus_inf = register_new_node(v0::Constant::create(element::f32, Shape{}, {-std::numeric_limits<float>::infinity()}));
+    auto minus_inf =
+        register_new_node(v0::Constant::create(element::f32, Shape{}, {-std::numeric_limits<float>::infinity()}));
     auto zero_i = register_new_node(v0::Constant::create(element::i32, Shape{}, {0}));
     auto one_i = register_new_node(v0::Constant::create(element::i32, Shape{}, {1}));
     auto one_f = register_new_node<v1::ConvertLike>(one_i, query);
@@ -115,9 +220,9 @@ std::shared_ptr<ov::Node> ScaledDotProductAttentionPartialDecomposition::decompo
             auto triu = register_new_node<v1::GreaterEqual>(horizontal_range, vertical_range);
             atten_mask = register_new_node<v1::Select>(triu, mask, zero_f);
         }
-        gpu_sdpa = register_new_node<op::ScaledDotProductAttention>(query, key, value, scale, atten_mask);
+        gpu_sdpa = register_new_node<op::ScaledDotProductAttention>(query, key, value, scale, atten_mask, order_q, order_k, order_v, order_out);
     } else {
-        gpu_sdpa = register_new_node<op::ScaledDotProductAttention>(query, key, value, scale);
+        gpu_sdpa = register_new_node<op::ScaledDotProductAttention>(query, key, value, scale, order_q, order_k, order_v, order_out);
     }
 
     gpu_sdpa->set_friendly_name(node->get_friendly_name());

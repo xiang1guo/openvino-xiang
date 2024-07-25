@@ -15,7 +15,14 @@ class ScaledDotProductAttentionPartialDecomposition : public ov::pass::MatcherPa
 public:
     OPENVINO_RTTI("ScaledDotProductAttentionPartialDecomposition", "0");
     ScaledDotProductAttentionPartialDecomposition();
-    std::shared_ptr<ov::Node> decompose(std::shared_ptr<ov::op::v13::ScaledDotProductAttention> node);
+    std::shared_ptr<ov::Node> decompose(std::shared_ptr<ov::op::v13::ScaledDotProductAttention> node,
+    ov::Output<Node>& query,
+    ov::Output<Node>& key,
+    ov::Output<Node>& value,
+    const std::vector<int64_t>& order_q,
+    const std::vector<int64_t>& order_k,
+    const std::vector<int64_t>& order_v,
+    const std::vector<int64_t>& order_out);
 };
 
 }  // namespace intel_gpu

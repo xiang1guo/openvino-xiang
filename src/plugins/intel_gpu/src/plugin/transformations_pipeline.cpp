@@ -324,8 +324,8 @@ void TransformationsPipeline::apply(std::shared_ptr<ov::Model> func) {
         
         if (device_info.supports_immad) {
             // partial decomposition of SDPA
-            // manager.register_pass<ov::intel_gpu::ScaledDotProductAttentionPartialDecomposition>();
-            // pass_config->disable<ov::pass::ScaledDotProductAttentionDecomposition>();
+            manager.register_pass<ov::intel_gpu::ScaledDotProductAttentionPartialDecomposition>();
+            pass_config->disable<ov::pass::ScaledDotProductAttentionDecomposition>();
         }
 
         manager.register_pass<ov::pass::CommonOptimizations>();
@@ -335,7 +335,7 @@ void TransformationsPipeline::apply(std::shared_ptr<ov::Model> func) {
                 GPU_DEBUG_CODE(return cldnn::debug_configuration::get_instance()->enable_sdpa == 1);
             }
 
-            // return false;
+            return false;
 
             if (!config.get_property(ov::intel_gpu::hint::enable_sdpa_optimization))
                 return false;
