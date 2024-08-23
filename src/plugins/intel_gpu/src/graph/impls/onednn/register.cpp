@@ -7,8 +7,7 @@
 namespace cldnn {
 namespace onednn {
 
-#define REGISTER_ONEDNN_IMPL(prim)                       \
-    static detail::attach_##prim##_onednn attach_##prim
+#define REGISTER_ONEDNN_IMPL(prim) static detail::attach_##prim##_onednn attach_##prim
 
 void register_implementations() {
     REGISTER_ONEDNN_IMPL(convolution);
@@ -18,7 +17,9 @@ void register_implementations() {
     REGISTER_ONEDNN_IMPL(pooling);
     REGISTER_ONEDNN_IMPL(reduction);
     REGISTER_ONEDNN_IMPL(reorder);
-    REGISTER_ONEDNN_IMPL(fully_connected);}
+    REGISTER_ONEDNN_IMPL(fully_connected);
+    REGISTER_ONEDNN_IMPL(scaled_dot_product_attention_graph);
+}
 
 }  // namespace onednn
 }  // namespace cldnn

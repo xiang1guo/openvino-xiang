@@ -23,6 +23,7 @@ REGISTER_ONEDNN_IMPL(pooling);
 REGISTER_ONEDNN_IMPL(reduction);
 REGISTER_ONEDNN_IMPL(reorder);
 REGISTER_ONEDNN_IMPL(fully_connected);
+REGISTER_ONEDNN_IMPL(scaled_dot_product_attention_graph);
 
 #undef REGISTER_ONEDNN_IMPL
 
