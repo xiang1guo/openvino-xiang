@@ -11,8 +11,8 @@
 #include <oneapi/dnnl/dnnl_ocl.hpp>
 #include <ostream>
 
-#include "implementation_map.hpp"
 #include "impls/ocl/kernel_selector_helper.h"
+#include "impls/registry/implementation_map.hpp"
 #include "primitive_onednn_graph_base.hpp"
 #include "scaled_dot_product_attention_inst.h"
 

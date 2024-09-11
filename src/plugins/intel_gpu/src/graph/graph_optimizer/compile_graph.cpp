@@ -25,6 +25,7 @@
 #include <iomanip>
 
 #include "openvino/runtime/threading/cpu_streams_executor.hpp"
+#include "scaled_dot_product_attention_inst.h"
 
 using namespace cldnn;
 
@@ -85,6 +86,10 @@ void compile_graph::run(program& p) {
 
         if (change_initial_impl)
             node->set_preferred_impl_type(impl_types::ocl);
+
+        if (node->is_type<scaled_dot_product_attention>()) {
+            node->set_preferred_impl_type(impl_types::onednn);
+        }
 
         bool can_select_impl = !node->is_type<data>() &&
                                !(node->is_type<mutable_data>() && node->get_dependencies().empty()) &&

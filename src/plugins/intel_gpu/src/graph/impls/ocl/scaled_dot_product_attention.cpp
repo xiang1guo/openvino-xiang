@@ -323,5 +323,5 @@ attach_scaled_dot_product_attention_impl::attach_scaled_dot_product_attention_im
 }  // namespace ocl
 }  // namespace cldnn
 
-BIND_BINARY_BUFFER_WITH_TYPE(cldnn::ocl::scaled_dot_product_attention_impl)
-BIND_BINARY_BUFFER_WITH_TYPE(cldnn::scaled_dot_product_attention)
+// BIND_BINARY_BUFFER_WITH_TYPE(cldnn::ocl::scaled_dot_product_attention_impl)
+// BIND_BINARY_BUFFER_WITH_TYPE(cldnn::scaled_dot_product_attention)
