@@ -49,7 +49,7 @@ struct scaled_dot_product_attention_graph_onednn : typed_primitive_onednn_graph_
 #ifdef ONEDNN_PRIMITIVE_SERIALIZATION
         parent::load(ib);
         ib >> _has_attn_mask;
-        build_graph(ib.get_engine());
+        // build_graph(ib.get_engine());
 #endif
     }
 
@@ -116,7 +116,7 @@ struct scaled_dot_product_attention_graph_onednn : typed_primitive_onednn_graph_
                                  {lt_id, matmul_v_out}};
         } else {
             logical_tensor softmax_out{lt_id++, dtype, qk_output_shape, logical_tensor::layout_type::strided};
-            op softmax{3, op::kind::SoftMax, {scaled_qk_out}, {softmax_out}, "softmax"};
+            op softmax{3, op::kind::SoftMax, {matmul_qk_out}, {softmax_out}, "softmax"};
             softmax.set_attr<int64_t>(op::attr::axis, -1);
 
             logical_tensor value_input{2, dtype, value_shape, logical_tensor::layout_type::strided};
@@ -125,7 +125,7 @@ struct scaled_dot_product_attention_graph_onednn : typed_primitive_onednn_graph_
 
             g = std::make_shared<graph>(dnnl::engine::kind::gpu);
             g->add_op(matmul_qk);
-            g->add_op(scale_div);
+            // g->add_op(scale_div);
             g->add_op(softmax);
             g->add_op(matmul_v);
             g->finalize();
@@ -134,7 +134,7 @@ struct scaled_dot_product_attention_graph_onednn : typed_primitive_onednn_graph_
             _concrete_tensors = {{0, query_input},
                                  {1, key_input},
                                  {2, value_input},
-                                 {3, scale_factor},
+                                //  {3, scale_factor},
                                  {lt_id, matmul_v_out}};
         }
 
@@ -239,7 +239,7 @@ protected:
         }
 
         config.head_size = query_shape[query_shape.size() - 1].get_length();
-        config.head_num = query_shape[1].get_length();
+        config.heads_num = query_shape[1].get_length();
         config.kv_heads_num = key_shape[1].get_length();
 
         config.is_causal = desc->is_causal;
@@ -274,7 +274,7 @@ public:
         auto& engine = impl_params.prog->get_engine();
         auto& config = impl_params.prog->get_config();
 
-        auto sdpa_kernel_params = get_kernel_params(impl_param);
+        auto sdpa_kernel_params = get_kernel_params(impl_params);
 
         return cldnn::make_unique<scaled_dot_product_attention_graph_onednn>(engine,
                                                                              config,

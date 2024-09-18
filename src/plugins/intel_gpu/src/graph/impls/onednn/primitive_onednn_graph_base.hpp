@@ -25,6 +25,7 @@
 #include "reorder/reorder_weights_kernel_selector.h"
 #include "reorder_inst.h"
 #include "runtime/ocl/ocl_event.hpp"
+#include "sdpa/sdpa_kernel_base.h"
 #include "to_string_utils.h"
 #include "utils.hpp"
 
