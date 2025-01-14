@@ -4,13 +4,14 @@
 
 #include <exception>
 
+#include "registry/implementation_manager.hpp"
+#include "registry/registry.hpp"
 #include "intel_gpu/primitives/data.hpp"
 #include "intel_gpu/primitives/mutable_data.hpp"
 #include "intel_gpu/runtime/itt.hpp"
 #include "pass_manager.h"
 #include "program_node.h"
-#include "registry/implementation_manager.hpp"
-#include "registry/registry.hpp"
+#include "scaled_dot_product_attention_inst.h"
 
 using namespace cldnn;
 
