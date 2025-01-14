@@ -145,6 +145,7 @@ REGISTER_IMPLS(reorder);
 REGISTER_IMPLS(reshape);
 REGISTER_IMPLS(non_max_suppression);
 REGISTER_IMPLS(softmax);
+REGISTER_IMPLS(scaled_dot_product_attention_graph);
 REGISTER_IMPLS(range);
 REGISTER_IMPLS(select);
 REGISTER_IMPLS(scatter_update);
