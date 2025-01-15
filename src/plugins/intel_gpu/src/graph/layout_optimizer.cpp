@@ -32,6 +32,7 @@
 #include "depth_to_space_inst.h"
 #include "region_yolo_inst.h"
 #include "prior_box_inst.h"
+#include "scaled_dot_product_attention_inst.h"
 #include "scatter_nd_update_inst.h"
 #include "gather_inst.h"
 #include "broadcast_inst.h"
@@ -1126,8 +1127,9 @@ format layout_optimizer::get_expected_format(quantize_node const& node) {
 
 bool layout_optimizer::is_primitive_implemented_for_onednn(program_node& node) {
     if (node.is_type<fully_connected>() || node.is_type<gemm>() || node.is_type<pooling>() ||
-        node.is_type<convolution>() || node.is_type<deconvolution>() ||
-        node.is_type<reduce>() || node.is_type<reorder>() || node.is_type<concatenation>() || node.is_type<lstm_seq>()) {
+        node.is_type<convolution>() || node.is_type<deconvolution>() || node.is_type<reduce>() ||
+        node.is_type<reorder>() || node.is_type<concatenation>() || node.is_type<lstm_seq>() ||
+        node.is_type<scaled_dot_product_attention>()) {
         return true;
     }
 
@@ -1164,6 +1166,11 @@ impl_types layout_optimizer::get_forced_impl_type_by_config(program_node& node) 
                 if (forced_impl_type == "concat:ocl")
                     return impl_types::ocl;
                 else if (forced_impl_type == "concat:onednn")
+                    return impl_types::onednn;
+            } else if (node.is_type<scaled_dot_product_attention>()) {
+                if (forced_impl_type == "sdpa:ocl")
+                    return impl_types::ocl;
+                else if (forced_impl_type == "sdpa:onednn")
                     return impl_types::onednn;
             }
 
@@ -1433,12 +1440,15 @@ void layout_optimizer::add_all_onednn_impls_optimization_attribute() {
     enable_onednn_for<pooling>();
     enable_onednn_for<reduce>();
     enable_onednn_for<reorder>();
+    enable_onednn_for<scaled_dot_product_attention>();
 }
 
 bool layout_optimizer::has_all_enabled_onednn_impls_optimization_attribute() {
-    return is_enabled_onednn_for<concatenation>() && is_enabled_onednn_for<convolution>() && is_enabled_onednn_for<deconvolution>() &&
-        is_enabled_onednn_for<fully_connected>() && is_enabled_onednn_for<gemm>() && is_enabled_onednn_for<lstm_seq>() &&
-        is_enabled_onednn_for<pooling>() && is_enabled_onednn_for<reduce>() && is_enabled_onednn_for<reorder>();
+    return is_enabled_onednn_for<concatenation>() && is_enabled_onednn_for<convolution>() &&
+           is_enabled_onednn_for<deconvolution>() && is_enabled_onednn_for<fully_connected>() &&
+           is_enabled_onednn_for<gemm>() && is_enabled_onednn_for<lstm_seq>() && is_enabled_onednn_for<pooling>() &&
+           is_enabled_onednn_for<reduce>() && is_enabled_onednn_for<reorder>() &&
+           is_enabled_onednn_for<scaled_dot_product_attention>();
 }
 
 void layout_optimizer::set_value_onednn(primitive_type_id p_type, bool val) {

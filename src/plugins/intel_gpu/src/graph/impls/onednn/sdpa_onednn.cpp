@@ -10,11 +10,11 @@
 #include <oneapi/dnnl/dnnl_ocl.hpp>
 #include <ostream>
 
-// #include "implementation_map.hpp"
-// #include "impls/ocl/kernel_selector_helper.h"
 #include "impls/registry/implementation_manager.hpp"
 #include "primitive_onednn_graph_base.hpp"
 #include "scaled_dot_product_attention_inst.h"
+#include"sdpa_onednn.hpp"
+
 using namespace dnnl::graph;
 namespace cldnn {
 namespace onednn {
@@ -183,20 +183,7 @@ public:
                                                                              impl_params.output_layouts[0]);
     }
 };
-// namespace detail {
-// attach_scaled_dot_product_attention_graph_onednn::attach_scaled_dot_product_attention_graph_onednn() {
-//     std::vector<data_types> dt = {
-//         data_types::f16,
-//     };
-//     std::vector<format::type> fmt = {
-//         format::bfyx,
-//     };
-//     implementation_map<scaled_dot_product_attention>::add(impl_types::onednn,
-//                                                           scaled_dot_product_attention_graph_onednn::create,
-//                                                           dt,
-//                                                           fmt);
-// }
-// }  // namespace detail
+
 std::unique_ptr<primitive_impl> ScaledDotProductAttentionImplementationManager::create_impl(
     const program_node& node,
     const kernel_impl_params& params) const {

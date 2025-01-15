@@ -23,16 +23,10 @@ namespace intel_gpu {
 
 using namespace cldnn;
 
-const std::vector<std::shared_ptr<cldnn::ImplementationManager>>& Registry<ScaledDotProductAttention>::get_implementations() {
+const std::vector<std::shared_ptr<cldnn::ImplementationManager>>&
+Registry<scaled_dot_product_attention>::get_implementations() {
     static const std::vector<std::shared_ptr<ImplementationManager>> impls = {
         OV_GPU_CREATE_INSTANCE_ONEDNN(onednn::ScaledDotProductAttentionImplementationManager, shape_types::static_shape)
-        OV_GPU_CREATE_INSTANCE_OCL(ocl::ScaledDotProductAttentionImplementationManager, shape_types::static_shape)
-        OV_GPU_CREATE_INSTANCE_OCL(ocl::ScaledDotProductAttentionImplementationManager, shape_types::dynamic_shape,
-            [](const cldnn::program_node& node){
-                if (node.can_use(impl_types::onednn))
-                    return false;
-                return node.as<ScaledDotProductAttention>().use_explicit_padding();
-        })
     };
 
     return impls;

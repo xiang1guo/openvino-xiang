@@ -15,7 +15,6 @@
 #include "impls/registry/implementation_manager.hpp"
 #include "intel_gpu/primitives/scaled_dot_product_attention.hpp"
 #include "intel_gpu/runtime/utils.hpp"
-#include "primitive_onednn_graph_base.hpp"
 #include "scaled_dot_product_attention_inst.h"
 
 namespace cldnn {
@@ -37,10 +36,10 @@ struct ScaledDotProductAttentionImplementationManager : public ImplementationMan
         const auto& sdpa_node = node.as<scaled_dot_product_attention>();
         const auto& in_layout = sdpa_node.get_input_layout(0);
         const auto& out_layout = sdpa_node.get_output_layout(0);
-        auto in0_dt = in_layout.data_type;
+        auto in_dt = in_layout.data_type;
         auto out_dt = out_layout.data_type;
 
-        if (!everyone_is(data_types::f16, in_dt, wei_dt))
+        if (!everyone_is(data_types::f16, in_dt, out_dt))
             return false;
 
         if (!everyone_is(format::bfyx, in_layout.format, out_layout.format) &&
