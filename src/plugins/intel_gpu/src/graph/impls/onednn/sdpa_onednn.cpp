@@ -10,11 +10,10 @@
 #include <oneapi/dnnl/dnnl_ocl.hpp>
 #include <ostream>
 
-#include "impls/registry/implementation_manager.hpp"
 #include "primitive_onednn_graph_base.hpp"
+#include "impls/registry/implementation_manager.hpp"
 #include "scaled_dot_product_attention_inst.h"
-#include"sdpa_onednn.hpp"
-
+#include "sdpa_onednn.hpp"
 using namespace dnnl::graph;
 namespace cldnn {
 namespace onednn {
@@ -25,11 +24,12 @@ struct scaled_dot_product_attention_graph_onednn : typed_primitive_onednn_graph_
     DECLARE_OBJECT_TYPE_SERIALIZATION(cldnn::onednn::scaled_dot_product_attention_graph_onednn)
     scaled_dot_product_attention_graph_onednn(const engine& engine,
                                               const ExecutionConfig& config,
+                                              const kernel_params_t& sdpa_param,
                                               const std::vector<cldnn::layout>& input_layouts,
                                               const cldnn::layout& output_layout)
         : parent(engine, config, input_layouts, output_layout),
           _has_attn_mask(_input_layouts.size() == 5) {
-        build_graph(engine);
+        build_graph(engine, sdpa_param);
     }
     void save(BinaryOutputBuffer& ob) const override {
 #ifdef ONEDNN_PRIMITIVE_SERIALIZATION
@@ -41,15 +41,15 @@ struct scaled_dot_product_attention_graph_onednn : typed_primitive_onednn_graph_
 #ifdef ONEDNN_PRIMITIVE_SERIALIZATION
         parent::load(ib);
         ib >> _has_attn_mask;
-        build_graph(ib.get_engine());
+        // build_graph(ib.get_engine());
 #endif
     }
-    void build_graph(const engine& engine) {
+    void build_graph(const engine& engine, const kernel_params_t& sdpa_param) {
         auto dnnl_engine = engine.get_onednn_engine();
         auto dtype = logical_tensor::data_type::f16;
-        auto query_shape = get_logical_tensor_dims(_input_layouts[0]);
-        auto key_shape = get_logical_tensor_dims(_input_layouts[1]);
-        auto value_shape = get_logical_tensor_dims(_input_layouts[2]);
+        auto query_shape = get_logical_tensor_dims(_input_layouts[0], sdpa_param.input0_order);
+        auto key_shape = get_logical_tensor_dims(_input_layouts[1], sdpa_param.input1_order);
+        auto value_shape = get_logical_tensor_dims(_input_layouts[2], sdpa_param.input2_order);
         bool has_attn_mask = _input_layouts.size() > 4;
         int64_t batch_size = query_shape[0];
         int64_t num_head = query_shape[1];
@@ -97,14 +97,14 @@ struct scaled_dot_product_attention_graph_onednn : typed_primitive_onednn_graph_
                                  {lt_id, matmul_v_out}};
         } else {
             logical_tensor softmax_out{lt_id++, dtype, qk_output_shape, logical_tensor::layout_type::strided};
-            op softmax{3, op::kind::SoftMax, {scaled_qk_out}, {softmax_out}, "softmax"};
+            op softmax{3, op::kind::SoftMax, {matmul_qk_out}, {softmax_out}, "softmax"};
             softmax.set_attr<int64_t>(op::attr::axis, -1);
             logical_tensor value_input{2, dtype, value_shape, logical_tensor::layout_type::strided};
             logical_tensor matmul_v_out{lt_id++, dtype, query_shape, logical_tensor::layout_type::strided};
             op matmul_v{4, op::kind::MatMul, {softmax_out, value_input}, {matmul_v_out}, "matmul_v"};
             g = std::make_shared<graph>(dnnl::engine::kind::gpu);
             g->add_op(matmul_qk);
-            g->add_op(scale_div);
+            // g->add_op(scale_div);
             g->add_op(softmax);
             g->add_op(matmul_v);
             g->finalize();
@@ -112,7 +112,7 @@ struct scaled_dot_product_attention_graph_onednn : typed_primitive_onednn_graph_
             _concrete_tensors = {{0, query_input},
                                  {1, key_input},
                                  {2, value_input},
-                                 {3, scale_factor},
+                                 //  {3, scale_factor},
                                  {lt_id, matmul_v_out}};
         }
         auto partitions = g->get_partitions();
@@ -172,17 +172,83 @@ protected:
         return make_unique<scaled_dot_product_attention_graph_onednn>(*this);
     }
 
+    static kernel_selector::sdpa_configuration get_sdpa_configuration(const kernel_impl_params& impl_param) {
+        kernel_selector::sdpa_configuration config;
+        auto transpose_pshape = [](const ov::PartialShape& pshape, const std::vector<int64_t>& order) {
+            if (order.empty())
+                return pshape;
+            auto transposed_pshape = ov::PartialShape::dynamic(pshape.rank());
+            for (size_t i = 0; i < order.size(); i++) {
+                transposed_pshape[i] = pshape[order[i]];
+            }
+            return transposed_pshape;
+        };
+        const auto& desc = impl_param.typed_desc<scaled_dot_product_attention>();
+        const auto query_shape =
+            transpose_pshape(impl_param.get_input_layout(0).get_partial_shape(), desc->input_q_transpose_order);
+        const auto key_shape =
+            transpose_pshape(impl_param.get_input_layout(1).get_partial_shape(), desc->input_k_transpose_order);
+        const auto value_shape =
+            transpose_pshape(impl_param.get_input_layout(2).get_partial_shape(), desc->input_v_transpose_order);
+        OPENVINO_ASSERT(key_shape == value_shape, "[GPU] The shapes of key and value inputs are expected to be equal");
+        for (size_t i = 0; i < query_shape.size(); ++i) {
+            if (query_shape[i].is_static() && key_shape[i].is_static() && value_shape[i].is_static()) {
+                if (query_shape[i].get_length() > key_shape[i].get_length()) {
+                    config.broadcast_axis = desc->input_k_transpose_order[i];
+                    config.group_size = query_shape[i].get_length() / key_shape[i].get_length();
+                }
+            }
+        }
+        config.head_size = query_shape[query_shape.size() - 1].get_length();
+        config.heads_num = query_shape[1].get_length();
+        config.kv_heads_num = key_shape[1].get_length();
+        config.is_causal = desc->is_causal;
+        return config;
+    }
+
 public:
+    static kernel_params_t get_kernel_params(const kernel_impl_params& impl_param) {
+        const auto& desc = impl_param.typed_desc<scaled_dot_product_attention>();
+        auto params = get_default_params<kernel_selector::sdpa_params>(impl_param);
+        auto data_inputs_num = impl_param.input_layouts.size();
+        params.inputs.resize(data_inputs_num);
+        for (size_t i = 0; i < data_inputs_num; i++) {
+            params.inputs[i] = convert_data_tensor(impl_param.get_input_layout(i));
+        }
+        params.conf = get_sdpa_configuration(impl_param);
+        params.input0_order = desc->input_q_transpose_order;
+        params.input1_order = desc->input_k_transpose_order;
+        params.input2_order = desc->input_v_transpose_order;
+        params.output_order = desc->output_transpose_order;
+        return params;
+    }
+
     static std::unique_ptr<primitive_impl> create(const scaled_dot_product_attention_node& arg,
                                                   const kernel_impl_params& impl_params) {
         auto& engine = impl_params.prog->get_engine();
         auto& config = impl_params.prog->get_config();
+        auto sdpa_kernel_params = get_kernel_params(impl_params);
         return cldnn::make_unique<scaled_dot_product_attention_graph_onednn>(engine,
                                                                              config,
+                                                                             sdpa_kernel_params,
                                                                              impl_params.input_layouts,
                                                                              impl_params.output_layouts[0]);
     }
 };
+// namespace detail {
+// attach_scaled_dot_product_attention_graph_onednn::attach_scaled_dot_product_attention_graph_onednn() {
+//     std::vector<data_types> dt = {
+//         data_types::f16,
+//     };
+//     std::vector<format::type> fmt = {
+//         format::bfyx,
+//     };
+//     implementation_map<scaled_dot_product_attention>::add(impl_types::onednn,
+//                                                           scaled_dot_product_attention_graph_onednn::create,
+//                                                           dt,
+//                                                           fmt);
+// }
+// }  // namespace detail
 
 std::unique_ptr<primitive_impl> ScaledDotProductAttentionImplementationManager::create_impl(
     const program_node& node,

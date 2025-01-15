@@ -16,6 +16,7 @@
 #include "intel_gpu/runtime/file_util.hpp"
 #include "intel_gpu/runtime/memory.hpp"
 #include "primitive_inst.h"
+#include "sdpa/sdpa_kernel_base.h"
 // #include "quantize_inst.h"
 // #include "register.hpp"
 // #include "reorder/reorder_kernel_base.h"
@@ -29,6 +30,7 @@ using namespace dnnl::graph;
 namespace cldnn {
 namespace onednn {
 static std::mutex cacheAccessMutex;
+using kernel_params_t = kernel_selector::sdpa_params;
 struct compiled_partition_info {
     dnnl::graph::partition partition;
     dnnl::graph::compiled_partition compiled_partition;
@@ -119,14 +121,24 @@ static void set_any_layout(const std::vector<dnnl::graph::partition>& partitions
         }
     }
 }
-static logical_tensor::dims get_logical_tensor_dims(const cldnn::layout& layout) {
+
+static logical_tensor::dims get_logical_tensor_dims(const cldnn::layout& layout,
+                                                    const std::vector<int64_t>& order = {}) {
     auto cldnn_dims = layout.get_dims();
     logical_tensor::dims out_dims;
     std::transform(cldnn_dims.begin(), cldnn_dims.end(), std::back_inserter(out_dims), [](int32_t v) {
         return v;
     });
+    if (order.size() == out_dims.size()) {
+        logical_tensor::dims transposed_out_dims(out_dims.begin(), out_dims.end());
+        for (size_t i = 0; i < order.size(); i++) {
+            transposed_out_dims[i] = out_dims[order[i]];
+        }
+        return transposed_out_dims;
+    }
     return out_dims;
 }
+
 template <class PType>
 struct typed_primitive_onednn_graph_impl : public typed_primitive_impl<PType> {
     const engine* _engine;
